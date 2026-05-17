@@ -170,14 +170,19 @@ const DashboardCobrador = () => {
       const montoTotal = numericMonto * (1 + (interesPorcentaje / 100));
       const valorCuota = montoTotal / numCuotas;
 
+      // ACTUALIZACIÓN DIRECTA: Guardamos los datos de contacto del cliente dentro del documento del préstamo
       await addDoc(collection(db, "prestamos"), {
         clienteId: clientePrestamo.id,
         nombreCliente: clientePrestamo.nombre,
+        telefonoCliente: clientePrestamo.telefono, // Sincronizado para WhatsApp/Llamadas en Inicio
+        cedulaCliente: clientePrestamo.cedula,     // Sincronizado para detalles
+        montoPrestamo: numericMonto,               // Valor original prestado
         montoTotal,
         cuotaDiaria: valorCuota,
         cuotasRestantes: numCuotas,
         fecha: serverTimestamp(),
-        estado: 'en curso'
+        estado: 'en curso',
+        historialPagos: []                         // Inicializa el arreglo limpio para control diario
       });
       
       await updateDoc(doc(db, "clientes", clientePrestamo.id), { 
@@ -188,6 +193,16 @@ const DashboardCobrador = () => {
       setIsModalLoanOpen(false);
       setPrestamoData({ monto: '', cuotas: '30', interes: '20' });
     } catch (error) { mostrarAlerta(error.message, "error"); }
+  };
+
+  // FUNCIÓN: Lanzar llamada celular directa por minutos
+  const realizarLlamadaMinutos = (telefono) => {
+    if (!telefono) {
+      mostrarAlerta("⚠️ Sin número de contacto", "error");
+      return;
+    }
+    const telLimpio = String(telefono).replace(/\D/g, '');
+    window.location.href = `tel:${telLimpio}`;
   };
 
   const clientesFiltrados = clientes.filter(c => {
@@ -269,9 +284,18 @@ const DashboardCobrador = () => {
                     {[...Array(5)].map((_, i) => <Star key={i} size={12} fill={i < c.calificacion ? "#FFD700" : "none"} color="#FFD700" />)}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px' }} onClick={(e) => e.stopPropagation()}>
-                  <a href={`https://wa.me/57${c.telefono}`} target="_blank" rel="noreferrer"><MessageCircle size={22} color="#25D366" /></a>
-                  <Edit2 size={22} color="#39FF14" onClick={() => abrirAuth(c, 'cliente')} />
+                {/* ACCIONES DE CONTACTO Y MENSAJES RÁPIDOS */}
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                  {/* Botón de Llamadas Directas */}
+                  <Phone size={20} color="#0070f3" onClick={() => realizarLlamadaMinutos(c.telefono)} style={{ cursor: 'pointer' }} />
+                  
+                  {/* Botón WhatsApp */}
+                  <a href={`https://wa.me/57${c.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer">
+                    <MessageCircle size={22} color="#25D366" />
+                  </a>
+                  
+                  {/* Botón Editar Cuenta */}
+                  <Edit2 size={20} color="#39FF14" onClick={() => abrirAuth(c, 'cliente')} style={{ cursor: 'pointer' }} />
                 </div>
               </div>
               
