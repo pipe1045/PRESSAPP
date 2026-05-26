@@ -1,29 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { TrendingUp, Bell, CheckCircle2, XCircle, ChevronDown, ChevronUp, Phone, MessageCircle, Clock } from 'lucide-react';
+import { TrendingUp, Bell, CheckCircle2, XCircle, ChevronDown, ChevronUp, Phone, MessageCircle, Clock, AlertTriangle } from 'lucide-react';
 
 const DashboardHome = () => {
   const [prestamos, setPrestamos] = useState([]);
+  const [clientesMap, setClientesMap] = useState({}); // Mapa para cruzar datos frescos de clientes
   const [cargando, setCargando] = useState(true);
   const [clienteExpandido, setClienteExpandido] = useState(null); 
   const [capitalEnCalle, setCapitalEnCalle] = useState(0);
   
-  // FILTRO GLOBAL DE FECHA: Afecta a toda la lista en tiempo real (inicializa en hoy)
+  // FILTRO GLOBAL DE FECHA: Inicializa en hoy (Hora Local Colombia)
   const [fechaFiltro, setFechaFiltro] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
-    // Traemos todos los préstamos en curso para poder filtrarlos y auditarlos globalmente sin que desaparezcan
-    const q = query(collection(db, "prestamos"), where("estado", "==", "en curso"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // 1. Escuchar la colección de Clientes en tiempo real para reflejar cambios o borrados inmediatamente
+    const qClientes = query(collection(db, "clientes"), where("estado", "==", "activo"));
+    const unsubscribeClientes = onSnapshot(qClientes, (snapshot) => {
+      const mapa = {};
+      snapshot.forEach(docSnap => {
+        mapa[docSnap.id] = docSnap.data();
+      });
+      setClientesMap(mapa);
+    });
+
+    // 2. Escuchar la colección de Préstamos en curso
+    const qPrestamos = query(collection(db, "prestamos"), where("estado", "==", "en curso"));
+    const unsubscribePrestamos = onSnapshot(qPrestamos, (snapshot) => {
       const listaPrestamos = [];
       let totalCapital = 0;
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         const id = docSnap.id;
-        totalCapital += Number(data.montoTotal || 0);
+        
+        // Si el cliente fue eliminado de la colección clientes, decidimos si mostrarlo o no de forma segura
+        totalCapital += Number(data.totalDeuda || data.montoTotal || 0);
         listaPrestamos.push({ id, ...data });
       });
 
@@ -32,7 +44,10 @@ const DashboardHome = () => {
       setCargando(false);
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribeClientes();
+      unsubscribePrestamos();
+    };
   }, []);
 
   const procesarCobroDiario = async (prestamoId, actualHistorial, actualCuotas, accion) => {
@@ -44,17 +59,30 @@ const DashboardHome = () => {
 
     if (accion === 'pagado') {
       nuevoHistorial.push({ fecha: hoyStr, estado: 'pagado' });
-      // NOTA: Ya no cerramos el acordeón ni removemos el cliente para que NO se desaparezca de la pantalla
       await updateDoc(prestamoRef, {
         historialPagos: nuevoHistorial,
         cuotasRestantes: Math.max(0, actualCuotas - 1)
       });
     } else if (accion === 'no-pago') {
+      // Registro estricto para clientes que NO cancelaron hoy
       nuevoHistorial.push({ fecha: hoyStr, estado: 'no-pago' });
       await updateDoc(prestamoRef, {
         historialPagos: nuevoHistorial
       });
     }
+  };
+
+  // Función para construir enlace automatizado de cobro por WhatsApp
+  const generarMensajeWhatsApp = (p) => {
+    const telefono = String(p.telefonoCliente || p.telefono || '').replace(/\D/g, '');
+    const nombre = p.nombreCliente || "Cliente";
+    const cuota = Math.round(p.cuotaDiaria || 0).toLocaleString('es-CO');
+    const deuda = Math.round(p.totalDeuda || p.montoTotal || 0).toLocaleString('es-CO');
+    
+    const mensaje = encodeURIComponent(
+      `Hola ${nombre}, te saludamos de Cobranzas Centralizadas. 👋\n\nTe recordamos que tu cuota asignada para el día de hoy es de *$ ${cuota}*. Tu saldo pendiente en sistema es de $ ${deuda}. Por favor nos confirmas tu pago de la ruta. ¡Quedamos atentos! 👍`
+    );
+    return `https://wa.me/57${telefono}?text=${mensaje}`;
   };
 
   const realizarLlamadaMinutos = (telefono) => {
@@ -79,7 +107,7 @@ const DashboardHome = () => {
       {/* Tarjeta de Saldo Total en Calle */}
       <div style={{ backgroundColor: '#111', padding: '24px', borderRadius: '24px', border: '1px solid rgba(57,255,20,0.15)', marginBottom: '25px', boxShadow: '0 10px 30px rgba(0,0,0,0.7)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span style={{ color: '#666', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Capital Activo en Calle</span>
+          <span style={{ color: '#666', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Capital Activo en Calle Real</span>
           <TrendingUp size={20} color="#39FF14" />
         </div>
         <div style={{ fontSize: '42px', fontWeight: '900', color: '#fff' }}>
@@ -87,7 +115,7 @@ const DashboardHome = () => {
         </div>
         <div style={{ color: '#39FF14', fontSize: '10px', marginTop: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <div style={{ width: '8px', height: '8px', backgroundColor: '#39FF14', borderRadius: '50%', boxShadow: '0 0 8px #39FF14' }}></div>
-          CENTRAL DE MONITOREO ACTIVADA
+          CENTRAL DE TRÁFICO Y CONTROL ACTIVA
         </div>
       </div>
 
@@ -116,7 +144,7 @@ const DashboardHome = () => {
           <div style={{ color: '#39FF14', fontSize: '14px', textAlign: 'center', padding: '20px' }}>Sincronizando flujos con servidor...</div>
         ) : prestamos.length === 0 ? (
           <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px', border: '1px solid rgba(255,255,255,0.02)' }}>
-            <div style={{ backgroundColor: '#39FF14', padding: '12px', borderRadius: '15px', color: 'black', display: 'flex', alignItems: 'center', center: 'center' }}>
+            <div style={{ backgroundColor: '#39FF14', padding: '12px', borderRadius: '15px', color: 'black', display: 'flex', alignItems: 'center' }}>
               <Bell size={22} />
             </div>
             <div>
@@ -128,9 +156,12 @@ const DashboardHome = () => {
           prestamos.map((p) => {
             const estaAbierto = clienteExpandido === p.id;
             
-            // Evaluamos el estado de la cuota del cliente específico para la fecha seleccionada en el calendario global
+            // Evaluamos el estado de la cuota del cliente específico para la fecha seleccionada
             const registroFecha = (p.historialPagos || []).find(h => h.fecha === fechaFiltro);
-            const estadoCuota = registroFecha ? (registroFecha.state || registroFecha.estado) : 'pendiente';
+            const estadoCuota = registroFecha ? (registroFecha.estado || registroFecha.state) : 'pendiente';
+            
+            // Estilos dinámicos tácticos según la alerta de no pago
+            const esIncumplido = estadoCuota === 'no-pago';
             
             return (
               <div 
@@ -138,7 +169,8 @@ const DashboardHome = () => {
                 style={{ 
                   backgroundColor: '#111', 
                   borderRadius: '20px', 
-                  border: estaAbierto ? '1px solid #39FF14' : '1px solid #222',
+                  border: esIncumplido ? '1px solid #ff4444' : estaAbierto ? '1px solid #39FF14' : '1px solid #222',
+                  boxShadow: esIncumplido ? '0 0 10px rgba(255,68,68,0.15)' : 'none',
                   overflow: 'hidden',
                   transition: 'all 0.3s ease'
                 }}
@@ -149,13 +181,13 @@ const DashboardHome = () => {
                   style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '12px', color: '#aaa' }}>
-                      <Bell size={20} />
+                    <div style={{ backgroundColor: esIncumplido ? 'rgba(255,68,68,0.1)' : 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '12px', color: esIncumplido ? '#ff4444' : '#aaa' }}>
+                      {esIncumplido ? <AlertTriangle size={20} /> : <Bell size={20} />}
                     </div>
                     <div>
                       <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#fff' }}>{p.nombreCliente}</div>
                       <div style={{ fontSize: '12px', color: '#666', fontWeight: 'bold', marginTop: '2px' }}>
-                        {`Cuota: $${Math.round(p.cuotaDiaria).toLocaleString()}`}
+                        {`Cuota: $${Math.round(p.cuotaDiaria).toLocaleString('es-CO')}`}
                       </div>
                     </div>
                   </div>
@@ -168,11 +200,11 @@ const DashboardHome = () => {
                       padding: '4px 10px',
                       borderRadius: '6px',
                       letterSpacing: '0.5px',
-                      backgroundColor: estadoCuota === 'pagado' ? 'rgba(57,255,20,0.1)' : estadoCuota === 'no-pago' ? 'rgba(255,68,68,0.1)' : 'rgba(255,255,255,0.05)',
-                      color: estadoCuota === 'pagado' ? '#39FF14' : estadoCuota === 'no-pago' ? '#ff4444' : '#888',
-                      border: estadoCuota === 'pagado' ? '1px solid rgba(57,255,20,0.2)' : estadoCuota === 'no-pago' ? '1px solid rgba(255,68,68,0.2)' : '1px solid #333'
+                      backgroundColor: estadoCuota === 'pagado' ? 'rgba(57,255,20,0.1)' : esIncumplido ? 'rgba(255,68,68,0.1)' : 'rgba(255,255,255,0.05)',
+                      color: estadoCuota === 'pagado' ? '#39FF14' : esIncumplido ? '#ff4444' : '#888',
+                      border: estadoCuota === 'pagado' ? '1px solid rgba(57,255,20,0.2)' : esIncumplido ? '1px solid rgba(255,68,68,0.3)' : '1px solid #333'
                     }}>
-                      {estadoCuota === 'pagado' ? 'PAGÓ ✓' : estadoCuota === 'no-pago' ? 'NO PAGÓ ✗' : 'PENDIENTE'}
+                      {estadoCuota === 'pagado' ? 'PAGÓ ✓' : esIncumplido ? 'INCUMPLIDO ✗' : 'PENDIENTE'}
                     </span>
                     {estaAbierto ? <ChevronUp size={18} color="#666" /> : <ChevronDown size={18} color="#666" />}
                   </div>
@@ -191,7 +223,7 @@ const DashboardHome = () => {
                         <Phone size={14} /> LLAMAR MINUTOS
                       </button>
                       <a 
-                        href={`https://wa.me/57${String(p.telefonoCliente || '').replace(/\D/g, '')}`} 
+                        href={generarMensajeWhatsApp(p)} 
                         target="_blank" 
                         rel="noreferrer" 
                         style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: '#25D366', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', textDecoration: 'none' }}
@@ -202,10 +234,10 @@ const DashboardHome = () => {
 
                     {/* Metadatos Generales */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px', fontSize: '12px' }}>
-                      <div><span style={{ color: '#555' }}>Monto Prestado:</span> <b style={{ color: '#fff' }}>${Math.round(p.montoPrestamo || 0).toLocaleString()}</b></div>
-                      <div><span style={{ color: '#555' }}>Deuda Total:</span> <b style={{ color: '#39FF14' }}>${Math.round(p.montoTotal).toLocaleString()}</b></div>
-                      <div><span style={{ color: '#555' }}>Cuotas Restantes:</span> <b style={{ color: '#fff' }}>{p.cuotasRestantes}</b></div>
-                      <div><span style={{ color: '#555' }}>Cédula:</span> <b style={{ color: '#fff' }}>{p.cedulaCliente || 'N/A'}</b></div>
+                      <div><span style={{ color: '#555' }}>Monto Original:</span> <b style={{ color: '#fff' }}>${Math.round(p.monto || p.montoPrestamo || 0).toLocaleString()}</b></div>
+                      <div><span style={{ color: '#555' }}>Deuda en Calle:</span> <b style={{ color: '#39FF14' }}>${Math.round(p.totalDeuda || p.montoTotal || 0).toLocaleString()}</b></div>
+                      <div><span style={{ color: '#555' }}>Cuotas Pendientes:</span> <b style={{ color: '#fff' }}>{p.cuotasRestantes}</b></div>
+                      <div><span style={{ color: '#555' }}>Cédula Ref:</span> <b style={{ color: '#fff' }}>{p.cedulaCliente || 'N/A'}</b></div>
                     </div>
 
                     {/* BOTONERA OPERATIVA (Solo disponible si se está visualizando el día de HOY) */}
