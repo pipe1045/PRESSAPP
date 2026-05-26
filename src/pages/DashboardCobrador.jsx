@@ -132,6 +132,7 @@ const DashboardCobrador = () => {
     } else { mostrarAlerta("❌ Clave incorrecta", "error"); }
   };
 
+  // REESTRUCTURADO: Guarda cambios del préstamo sin inyectar ID en los datos internos
   const guardarCambiosPrestamo = async (e) => {
     e.preventDefault();
     try {
@@ -146,16 +147,22 @@ const DashboardCobrador = () => {
             montoTotal: nuevoMontoTotal,
             cuotaDiaria: nuevoMontoTotal / diasNum
         });
+        
         setIsModalEditLoanOpen(false);
+        setIsModalHistoryOpen(false); // Cierra historial para refrescar la vista limpia
         mostrarAlerta("💾 Préstamo actualizado");
     } catch (error) { mostrarAlerta(error.message, "error"); }
   };
 
+  // CORRECCIÓN CRÍTICA: Extrae el ID para mapear la referencia y limpia los campos antes de enviarlos a Firestore
   const guardarCambios = async (e) => {
     e.preventDefault();
     try {
-      const clienteRef = doc(db, "clientes", clienteEditando.id);
-      await updateDoc(clienteRef, { ...clienteEditando });
+      const { id, ...datosLimpios } = clienteEditando; // Separa de manera limpia el ID de los datos
+      const clienteRef = doc(db, "clientes", id);
+      
+      await updateDoc(clienteRef, datosLimpios);
+      
       setIsModalEditOpen(false);
       mostrarAlerta("💾 Cambios guardados correctamente");
     } catch (error) { mostrarAlerta(error.message, "error"); }
@@ -170,19 +177,18 @@ const DashboardCobrador = () => {
       const montoTotal = numericMonto * (1 + (interesPorcentaje / 100));
       const valorCuota = montoTotal / numCuotas;
 
-      // ACTUALIZACIÓN DIRECTA: Guardamos los datos de contacto del cliente dentro del documento del préstamo
       await addDoc(collection(db, "prestamos"), {
         clienteId: clientePrestamo.id,
         nombreCliente: clientePrestamo.nombre,
-        telefonoCliente: clientePrestamo.telefono, // Sincronizado para WhatsApp/Llamadas en Inicio
-        cedulaCliente: clientePrestamo.cedula,     // Sincronizado para detalles
-        montoPrestamo: numericMonto,               // Valor original prestado
+        telefonoCliente: clientePrestamo.telefono, 
+        cedulaCliente: clientePrestamo.cedula,     
+        montoPrestamo: numericMonto,               
         montoTotal,
         cuotaDiaria: valorCuota,
         cuotasRestantes: numCuotas,
         fecha: serverTimestamp(),
         estado: 'en curso',
-        historialPagos: []                         // Inicializa el arreglo limpio para control diario
+        historialPagos: []                         
       });
       
       await updateDoc(doc(db, "clientes", clientePrestamo.id), { 
@@ -195,7 +201,6 @@ const DashboardCobrador = () => {
     } catch (error) { mostrarAlerta(error.message, "error"); }
   };
 
-  // FUNCIÓN: Lanzar llamada celular directa por minutos
   const realizarLlamadaMinutos = (telefono) => {
     if (!telefono) {
       mostrarAlerta("⚠️ Sin número de contacto", "error");
@@ -206,7 +211,7 @@ const DashboardCobrador = () => {
   };
 
   const clientesFiltrados = clientes.filter(c => {
-    const matchesSearch = c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.cedula.includes(busqueda);
+    const matchesSearch = (c.nombre || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.cedula || '').includes(busqueda);
     const matchesStars = filtroEstrellas === 0 || c.calificacion === filtroEstrellas;
     const matchesStatus = filtroEstado === 'todos' || c.estado === filtroEstado;
     return matchesSearch && matchesStars && matchesStatus;
@@ -284,17 +289,11 @@ const DashboardCobrador = () => {
                     {[...Array(5)].map((_, i) => <Star key={i} size={12} fill={i < c.calificacion ? "#FFD700" : "none"} color="#FFD700" />)}
                   </div>
                 </div>
-                {/* ACCIONES DE CONTACTO Y MENSAJES RÁPIDOS */}
                 <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                  {/* Botón de Llamadas Directas */}
                   <Phone size={20} color="#0070f3" onClick={() => realizarLlamadaMinutos(c.telefono)} style={{ cursor: 'pointer' }} />
-                  
-                  {/* Botón WhatsApp */}
-                  <a href={`https://wa.me/57${c.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer">
+                  <a href={`https://wa.me/57${(c.telefono || '').replace(/\D/g, '')}`} target="_blank" rel="noreferrer">
                     <MessageCircle size={22} color="#25D366" />
                   </a>
-                  
-                  {/* Botón Editar Cuenta */}
                   <Edit2 size={20} color="#39FF14" onClick={() => abrirAuth(c, 'cliente')} style={{ cursor: 'pointer' }} />
                 </div>
               </div>
@@ -321,7 +320,7 @@ const DashboardCobrador = () => {
       </div>
 
       {/* MODAL HISTORIAL DE PRÉSTAMOS */}
-      {isModalHistoryOpen && (
+      {isModalHistoryOpen && clienteHistorial && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.98)', padding: '20px', overflowY: 'auto', zIndex: 4500 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h3 style={{ color: '#39FF14', margin: 0 }}>EXPEDIENTE: {clienteHistorial.nombre}</h3>
@@ -377,17 +376,17 @@ const DashboardCobrador = () => {
       )}
 
       {/* MODAL EDICIÓN CLIENTE */}
-      {isModalEditOpen && (
+      {isModalEditOpen && clienteEditando && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.95)', zIndex: 5500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '420px', padding: '25px', borderRadius: '25px', border: '1px solid #39FF14' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><h3 style={{ margin: 0, color: '#39FF14' }}>EDITAR EXPEDIENTE</h3><X onClick={() => setIsModalEditOpen(false)}/></div>
-            <label style={labelStyle}>Nombre</label><input value={clienteEditando.nombre} onChange={e => setClienteEditando({...clienteEditando, nombre: e.target.value})} style={inputStyle} />
-            <label style={labelStyle}>Cédula</label><input value={clienteEditando.cedula} onChange={e => setClienteEditando({...clienteEditando, cedula: e.target.value})} style={inputStyle} />
-            <label style={labelStyle}>Teléfono</label><input value={clienteEditando.telefono} onChange={e => setClienteEditando({...clienteEditando, telefono: e.target.value})} style={inputStyle} />
-            <label style={labelStyle}>Dirección</label><input value={clienteEditando.direccion} onChange={e => setClienteEditando({...clienteEditando, direccion: e.target.value})} style={inputStyle} />
+            <label style={labelStyle}>Nombre</label><input value={clienteEditando.nombre || ''} onChange={e => setClienteEditando({...clienteEditando, nombre: e.target.value})} style={inputStyle} />
+            <label style={labelStyle}>Cédula</label><input value={clienteEditando.cedula || ''} onChange={e => setClienteEditando({...clienteEditando, cedula: e.target.value})} style={inputStyle} />
+            <label style={labelStyle}>Teléfono</label><input value={clienteEditando.telefono || ''} onChange={e => setClienteEditando({...clienteEditando, telefono: e.target.value})} style={inputStyle} />
+            <label style={labelStyle}>Dirección</label><input value={clienteEditando.direccion || ''} onChange={e => setClienteEditando({...clienteEditando, direccion: e.target.value})} style={inputStyle} />
             <div style={{ display: 'flex', gap: '15px' }}>
-              <div style={{ flex: 1 }}><label style={labelStyle}>Estado</label><select value={clienteEditando.estado} onChange={e => setClienteEditando({...clienteEditando, estado: e.target.value})} style={inputStyle}><option value="activo">ACTIVO</option><option value="inactivo">INACTIVO</option></select></div>
-              <div style={{ flex: 1 }}><label style={labelStyle}>Estrellas</label><input type="number" min="1" max="5" value={clienteEditando.calificacion} onChange={e => setClienteEditando({...clienteEditando, calificacion: parseInt(e.target.value)})} style={inputStyle} /></div>
+              <div style={{ flex: 1 }}><label style={labelStyle}>Estado</label><select value={clienteEditando.estado || 'activo'} onChange={e => setClienteEditando({...clienteEditando, estado: e.target.value})} style={inputStyle}><option value="activo">ACTIVO</option><option value="inactivo">INACTIVO</option></select></div>
+              <div style={{ flex: 1 }}><label style={labelStyle}>Estrellas</label><input type="number" min="1" max="5" value={clienteEditando.calificacion || 5} onChange={e => setClienteEditando({...clienteEditando, calificacion: parseInt(e.target.value)})} style={inputStyle} /></div>
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button onClick={() => eliminarConClave(clienteEditando.id)} style={{ flex: 1, background: '#ff4444', border: 'none', padding: '15px', borderRadius: '12px', color: 'white' }}><Trash2/></button>
@@ -398,7 +397,7 @@ const DashboardCobrador = () => {
       )}
 
       {/* MODAL EDICIÓN PRÉSTAMO */}
-      {isModalEditLoanOpen && (
+      {isModalEditLoanOpen && editPrestamoData && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.95)', zIndex: 5600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '400px', padding: '25px', borderRadius: '25px', border: '1px solid #39FF14' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -409,7 +408,7 @@ const DashboardCobrador = () => {
             <label style={labelStyle}>Monto Base (Sin Interés)</label>
             <input 
                 type="text" 
-                value={editPrestamoData.montoBase} 
+                value={editPrestamoData.montoBase || ''} 
                 onChange={e => setEditPrestamoData({...editPrestamoData, montoBase: formatCurrency(e.target.value)})} 
                 style={{...inputStyle, fontSize: '18px', color: '#39FF14', fontWeight: 'bold'}} 
             />
@@ -417,11 +416,11 @@ const DashboardCobrador = () => {
             <div style={{ display: 'flex', gap: '15px' }}>
                 <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Interés (%)</label>
-                    <input type="number" value={editPrestamoData.interes} onChange={e => setEditPrestamoData({...editPrestamoData, interes: e.target.value})} style={inputStyle} />
+                    <input type="number" value={editPrestamoData.interes || ''} onChange={e => setEditPrestamoData({...editPrestamoData, interes: e.target.value})} style={inputStyle} />
                 </div>
                 <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Días Restantes</label>
-                    <input type="number" value={editPrestamoData.cuotasRestantes} onChange={e => setEditPrestamoData({...editPrestamoData, cuotasRestantes: e.target.value})} style={inputStyle} />
+                    <input type="number" value={editPrestamoData.cuotasRestantes || ''} onChange={e => setEditPrestamoData({...editPrestamoData, cuotasRestantes: e.target.value})} style={inputStyle} />
                 </div>
             </div>
 
@@ -429,13 +428,13 @@ const DashboardCobrador = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                     <span style={{ fontSize: '11px', color: '#666' }}>TOTAL RECALCULADO:</span>
                     <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                        {formatCurrency(((parseFloat(editPrestamoData.montoBase.replace(/\D/g, "")) || 0) * (1 + (parseFloat(editPrestamoData.interes) / 100))).toString())}
+                        {formatCurrency(((parseFloat((editPrestamoData.montoBase || '0').replace(/\D/g, "")) || 0) * (1 + (parseFloat(editPrestamoData.interes || '0') / 100))).toString())}
                     </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '11px', color: '#666' }}>NUEVA CUOTA:</span>
                     <span style={{ color: '#39FF14', fontWeight: '900', fontSize: '20px' }}>
-                        {formatCurrency((((parseFloat(editPrestamoData.montoBase.replace(/\D/g, "")) || 0) * (1 + (parseFloat(editPrestamoData.interes) / 100))) / (parseInt(editPrestamoData.cuotasRestantes) || 1)).toString())}
+                        {formatCurrency((((parseFloat((editPrestamoData.montoBase || '0').replace(/\D/g, "")) || 0) * (1 + (parseFloat(editPrestamoData.interes || '0') / 100))) / (parseInt(editPrestamoData.cuotasRestantes || '1') || 1)).toString())}
                     </span>
                 </div>
             </div>
@@ -446,7 +445,7 @@ const DashboardCobrador = () => {
       )}
 
       {/* MODAL PRÉSTAMO NUEVO */}
-      {isModalLoanOpen && (
+      {isModalLoanOpen && clientePrestamo && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '400px', padding: '25px', borderRadius: '25px', border: '1px solid #39FF14' }}>
             <h3 style={{ color: '#39FF14', marginTop: 0 }}>NUEVO CRÉDITO: {clientePrestamo.nombre}</h3>
